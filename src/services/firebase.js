@@ -3,20 +3,26 @@ import { getAuth } from 'firebase/auth'
 import { getFirestore } from 'firebase/firestore'
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+  apiKey: (import.meta.env.VITE_FIREBASE_API_KEY || '').trim(),
+  authDomain: (import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '').trim(),
+  projectId: (import.meta.env.VITE_FIREBASE_PROJECT_ID || '').trim(),
+  storageBucket: (import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '').trim(),
+  messagingSenderId: (import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '').trim(),
+  appId: (import.meta.env.VITE_FIREBASE_APP_ID || '').trim()
 }
 
-// Check if valid Firebase configuration is present
-export const isFirebaseConfigured = Boolean(
-  firebaseConfig.apiKey &&
-  firebaseConfig.apiKey !== 'your_firebase_api_key' &&
-  firebaseConfig.projectId &&
-  firebaseConfig.projectId !== 'your_project_id'
+const FIREBASE_PLACEHOLDERS = new Set([
+  'your_firebase_api_key',
+  'your_project_id.firebaseapp.com',
+  'your_project_id',
+  'your_project_id.firebasestorage.app',
+  'your_messaging_sender_id',
+  'your_app_id'
+])
+
+// Check if valid Firebase configuration is present in .env
+export const isFirebaseConfigured = Object.values(firebaseConfig).every(
+  (value) => Boolean(value) && !FIREBASE_PLACEHOLDERS.has(value)
 )
 
 let app = null

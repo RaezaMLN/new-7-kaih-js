@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useAuthStore } from '../../stores/authStore'
 import { useSchoolStore } from '../../stores/schoolStore'
 import { useHabitStore } from '../../stores/habitStore'
@@ -14,8 +14,18 @@ const habitStore = useHabitStore()
 const attendanceStore = useAttendanceStore()
 
 const teacher = computed(() => authStore.currentUser)
+const teacherClasses = computed(() => authStore.getTeacherClasses(teacher.value, schoolStore.classes))
+const teacherClassLabel = computed(() => {
+  if (teacherClasses.value.length > 0) {
+    return teacherClasses.value.map(c => c.name).join(', ')
+  }
+  return activeStudent.value?.classId
+    ? schoolStore.getClassName(activeStudent.value.classId)
+    : '-'
+})
+
 const students = computed(() => {
-  return authStore.usersList.filter(u => u.role === 'siswa' && u.classId === 'xii_rpl_2')
+  return authStore.getStudentsForTeacher(teacher.value, schoolStore.classes)
 })
 
 const selectedLampiran = ref('lampiran_b')
@@ -24,8 +34,24 @@ const selectedYear = ref('2026')
 const selectedSemester = ref('Semester Ganjil')
 const selectedStudentUid = ref(students.value[0]?.uid || '')
 
+watch(students, (list) => {
+  if (!selectedStudentUid.value && list.length > 0) {
+    selectedStudentUid.value = list[0].uid
+  }
+})
+
 const activeStudent = computed(() => {
   return students.value.find(s => s.uid === selectedStudentUid.value) || students.value[0]
+})
+
+const activeStudentClass = computed(() => {
+  return schoolStore.getClassById(activeStudent.value?.classId)
+})
+
+const classMeetings = computed(() => {
+  return attendanceStore.getMeetingsForClass(
+    activeStudent.value?.classId || teacher.value?.assignedClassId || teacherClasses.value[0]?.id
+  )
 })
 
 // Monthly habit statistics for active student
@@ -37,7 +63,7 @@ const monthlyHabits = computed(() => {
 // Attendance summary
 const attendanceSummary = computed(() => {
   if (!activeStudent.value) return { hadir: 0, sakit: 0, izin: 0, alpa: 0, total: 0, percentage: 100 }
-  return attendanceStore.getStudentAttendanceSummary(activeStudent.value.uid)
+  return attendanceStore.getStudentAttendanceSummary(activeStudent.value.uid, activeStudent.value.classId)
 })
 
 function triggerPrint() {
@@ -63,7 +89,7 @@ function exportReportExcel() {
     exportData = [{
       'Nama Lengkap': activeStudent.value?.displayName,
       'NISN': activeStudent.value?.nisn,
-      'Kelas': 'XII RPL 2',
+      'Kelas': schoolStore.getClassName(activeStudent.value?.classId),
       'Jenis Kelamin': activeStudent.value?.gender === 'L' ? 'Laki-laki' : 'Perempuan',
       'Cita-Cita': activeStudent.value?.dreams || '-',
       'Hobi': activeStudent.value?.hobbies || '-',
@@ -77,7 +103,7 @@ function exportReportExcel() {
       'No': idx + 1,
       'Nama Siswa': s.displayName,
       'NISN': s.nisn,
-      'Kelas': 'XII RPL 2',
+      'Kelas': schoolStore.getClassName(s.classId),
       'Streak': s.streak || 1
     }))
   }
@@ -210,7 +236,7 @@ function exportReportExcel() {
               <td class="font-bold text-slate-900">{{ activeStudent?.displayName }}</td>
               <td class="w-28 py-1 font-semibold text-slate-600">Kelas / Rombel</td>
               <td class="w-4">:</td>
-              <td class="font-bold text-slate-900">XII RPL 2</td>
+              <td class="font-bold text-slate-900">{{ schoolStore.getClassName(activeStudent?.classId) }}</td>
             </tr>
             <tr>
               <td class="py-1 font-semibold text-slate-600">NISN / NIS</td>
@@ -341,7 +367,7 @@ function exportReportExcel() {
             </tr>
             <tr>
               <td class="p-2 font-bold border border-slate-900 bg-slate-50">Kelas / Kompetensi Keahlian</td>
-              <td class="p-2 border border-slate-900">XII RPL 2 / Rekayasa Perangkat Lunak</td>
+              <td class="p-2 border border-slate-900">{{ schoolStore.getClassName(activeStudent?.classId) }} / {{ activeStudentClass?.major || '-' }}</td>
             </tr>
             <tr>
               <td class="p-2 font-bold border border-slate-900 bg-slate-50">Jenis Kelamin</td>
@@ -382,7 +408,7 @@ function exportReportExcel() {
           <h3 class="text-base font-extrabold uppercase tracking-wide mt-0.5">
             REKAPITULASI PERTEMUAN & BIMBINGAN DENGAN MURID
           </h3>
-          <p class="text-xs text-slate-600">Kelas: XII RPL 2 • Semester Ganjil 2025/2026</p>
+          <p class="text-xs text-slate-600">Kelas: {{ teacherClassLabel }} • {{ selectedSemester }} 2025/2026</p>
         </div>
 
         <table class="print-table w-full border border-slate-900 text-xs mt-3">
@@ -428,12 +454,12 @@ function exportReportExcel() {
           <h3 class="text-base font-extrabold uppercase tracking-wide mt-0.5">
             DOKUMENTASI FOTO PERTEMUAN KELAS / PEMBINAAN
           </h3>
-          <p class="text-xs text-slate-600">Arsip Dokumentasi Kelas XII RPL 2</p>
+          <p class="text-xs text-slate-600">Arsip Dokumentasi Kelas {{ teacherClassLabel }}</p>
         </div>
 
         <div class="grid grid-cols-2 gap-4 mt-4">
           <div 
-            v-for="m in attendanceStore.meetings" 
+            v-for="m in classMeetings" 
             :key="m.id"
             class="border border-slate-300 p-2 rounded-xl text-center space-y-2"
           >
@@ -470,9 +496,11 @@ function exportReportExcel() {
               <span class="text-[10px] text-slate-300 font-mono italic">[Tanda Tangan Digital]</span>
             </div>
             <p class="font-bold border-b border-slate-900 inline-block text-slate-900">
-              {{ teacher?.displayName || 'RAEZA MAULANA' }}
+              {{ teacher?.displayName || 'Guru Wali' }}
             </p>
-            <p class="text-[10px] text-slate-500 font-mono">NIK. 1106232307990001</p>
+            <p class="text-[10px] text-slate-500 font-mono">
+              {{ teacher?.nip ? `NIP. ${teacher.nip}` : teacher?.nik ? `NIK. ${teacher.nik}` : `ID. ${teacher?.identifier || '-'}` }}
+            </p>
           </div>
         </div>
 
@@ -491,7 +519,7 @@ function exportReportExcel() {
 
         <!-- Official Validation Footer -->
         <div class="mt-6 text-center text-[10px] text-slate-400 font-mono border-t border-dashed border-slate-300 pt-2 flex items-center justify-between">
-          <span>Divalidasi secara elektronik melalui Sistem 7 KAIH SMK Negeri 5 Telkom Banda Aceh</span>
+          <span>Divalidasi secara elektronik melalui Sistem 7 KAIH {{ schoolStore.profile.name }}</span>
           <span>Dokumen Resmi Halaman 1/1</span>
         </div>
       </div>

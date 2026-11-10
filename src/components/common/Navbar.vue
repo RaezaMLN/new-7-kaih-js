@@ -43,7 +43,8 @@ const desktopNavItems = computed(() => {
       { name: 'Dashboard Kelas', path: '/guru/dashboard', icon: LayoutDashboard },
       { name: 'Siswa Asuh', path: '/guru/list-murid', icon: Users },
       { name: 'Presensi Pertemuan', path: '/guru/absensi-murid', icon: ClipboardCheck },
-      { name: 'Pelaporan Resmi', path: '/guru/pelaporan', icon: FileSpreadsheet }
+      { name: 'Pelaporan Resmi', path: '/guru/pelaporan', icon: FileSpreadsheet },
+      { name: 'Profil Saya', path: '/guru/profil', icon: User }
     ]
   }
 
@@ -51,15 +52,23 @@ const desktopNavItems = computed(() => {
     return [
       { name: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
       { name: 'Kelola Pengguna', path: '/admin/users', icon: Users },
-      { name: 'KOP & Profil Sekolah', path: '/admin/settings', icon: Settings }
+      { name: 'KOP & Profil Sekolah', path: '/admin/settings', icon: Settings },
+      { name: 'Profil Saya', path: '/admin/profil', icon: User }
     ]
   }
 
   return []
 })
 
-function handleLogout() {
-  authStore.logout()
+const profileRoute = computed(() => {
+  if (authStore.isStudent) return '/siswa/profil'
+  if (authStore.isTeacher) return '/guru/profil'
+  if (authStore.isAdmin) return '/admin/profil'
+  return '/'
+})
+
+async function handleLogout() {
+  await authStore.logout()
   router.push('/login')
 }
 </script>
@@ -110,24 +119,30 @@ function handleLogout() {
 
       <!-- Right User Menu -->
       <div class="flex items-center gap-2 sm:gap-4 flex-shrink-0">
-        <div class="hidden xl:flex flex-col text-right">
-          <span class="text-sm font-semibold text-slate-800 leading-tight">
-            {{ authStore.currentUser?.displayName }}
-          </span>
-          <span class="text-xs text-slate-500">
-            {{ authStore.currentUser?.identifier || authStore.currentUser?.username }}
-          </span>
-        </div>
+        <router-link
+          :to="profileRoute"
+          class="flex items-center gap-2 sm:gap-3 rounded-xl px-1.5 py-1 hover:bg-slate-100 transition"
+          title="Edit Profil Saya"
+        >
+          <div class="hidden xl:flex flex-col text-right">
+            <span class="text-sm font-semibold text-slate-800 leading-tight">
+              {{ authStore.currentUser?.displayName }}
+            </span>
+            <span class="text-xs text-slate-500">
+              {{ authStore.currentUser?.identifier || authStore.currentUser?.username }}
+            </span>
+          </div>
 
-        <img 
-          v-if="authStore.currentUser?.photoURL"
-          :src="authStore.currentUser.photoURL" 
-          alt="Avatar" 
-          class="w-9 h-9 rounded-full object-cover ring-2 ring-brand-500/20"
-        />
-        <div v-else class="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">
-          <User class="w-5 h-5" />
-        </div>
+          <img 
+            v-if="authStore.currentUser?.photoURL"
+            :src="authStore.currentUser.photoURL" 
+            alt="Avatar" 
+            class="w-9 h-9 rounded-full object-cover ring-2 ring-brand-500/20"
+          />
+          <div v-else class="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">
+            <User class="w-5 h-5" />
+          </div>
+        </router-link>
 
         <button 
           @click="handleLogout"

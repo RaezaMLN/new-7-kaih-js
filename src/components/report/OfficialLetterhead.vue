@@ -1,8 +1,9 @@
 <script setup>
+import { computed } from 'vue'
 import { useSchoolStore } from '../../stores/schoolStore'
 
 const schoolStore = useSchoolStore()
-const p = schoolStore.profile
+const p = computed(() => schoolStore.profile)
 </script>
 
 <template>

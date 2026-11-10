@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/authStore'
 import { useHabitStore } from '../../stores/habitStore'
+import { useSchoolStore } from '../../stores/schoolStore'
 import * as XLSX from 'xlsx'
 import { 
   Users, 
@@ -22,16 +23,27 @@ import {
 const router = useRouter()
 const authStore = useAuthStore()
 const habitStore = useHabitStore()
+const schoolStore = useSchoolStore()
 
 const searchQuery = ref('')
 const selectedFilter = ref('semua')
 const activeStudent = ref(null)
 
 const todayStr = habitStore.getTodayString()
+const teacher = computed(() => authStore.currentUser)
+const teacherClasses = computed(() => authStore.getTeacherClasses(teacher.value, schoolStore.classes))
+const teacherClassLabel = computed(() => {
+  if (teacherClasses.value.length > 0) {
+    return teacherClasses.value.map(c => c.name).join(', ')
+  }
+  return teacher.value?.assignedClassId
+    ? schoolStore.getClassName(teacher.value.assignedClassId)
+    : 'Siswa Binaan'
+})
 
-// Filter students for XII RPL 2
+// Dynamic students assigned to this Guru Wali
 const classStudents = computed(() => {
-  return authStore.usersList.filter(u => u.role === 'siswa' && u.classId === 'xii_rpl_2')
+  return authStore.getStudentsForTeacher(teacher.value, schoolStore.classes)
 })
 
 const filteredStudents = computed(() => {
@@ -52,14 +64,15 @@ function viewStudentDetail(student) {
   activeStudent.value = student
 }
 
-function openWhatsApp(phone, studentName) {
+function openWhatsApp(phone, studentName, studentClassId) {
   if (!phone) {
     alert('Nomor telepon belum diinputkan oleh siswa.')
     return
   }
   const cleanPhone = phone.replace(/[^0-9]/g, '')
   const formattedPhone = cleanPhone.startsWith('0') ? '62' + cleanPhone.slice(1) : cleanPhone
-  const message = `Halo ananda ${studentName}, ini Pak Raeza Maulana wali kelas XII RPL 2.`
+  const className = schoolStore.getClassName(studentClassId)
+  const message = `Halo ananda ${studentName}, ini ${teacher.value?.displayName || 'Guru Wali'} wali kelas ${className}.`
   window.open(`https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`, '_blank')
 }
 
@@ -73,7 +86,7 @@ function exportStudentsExcel() {
     'No': idx + 1,
     'Nama Lengkap': s.displayName,
     'NISN': s.nisn,
-    'Kelas': 'XII RPL 2',
+    'Kelas': schoolStore.getClassName(s.classId),
     'Streak (Hari)': s.streak || 1,
     'Capaian Hari Ini (%)': habitStore.getCompletionRate(s.uid, todayStr),
     'No HP Siswa': s.phone || '-',
@@ -85,8 +98,9 @@ function exportStudentsExcel() {
 
   const worksheet = XLSX.utils.json_to_sheet(exportData)
   const workbook = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'Siswa_Asuh_XII_RPL_2')
-  XLSX.writeFile(workbook, `Rekap_Siswa_Asuh_XII_RPL_2_${todayStr}.xlsx`)
+  const safeLabel = teacherClassLabel.value.replace(/[^a-zA-Z0-9]+/g, '_')
+  XLSX.utils.book_append_sheet(workbook, worksheet, `Siswa_Asuh_${safeLabel}`.slice(0, 31))
+  XLSX.writeFile(workbook, `Rekap_Siswa_Asuh_${safeLabel}_${todayStr}.xlsx`)
 }
 </script>
 
@@ -99,7 +113,7 @@ function exportStudentsExcel() {
           List Murid Dampingan 👥
         </h1>
         <p class="text-xs sm:text-sm text-slate-500">
-          Pantau perkembangan, biodata Lampiran A, dan kebiasaan siswa asuh kelas XII RPL 2.
+          Pantau perkembangan, biodata Lampiran A, dan kebiasaan siswa asuh ({{ teacherClassLabel }}).
         </p>
       </div>
 
@@ -213,7 +227,7 @@ function exportStudentsExcel() {
                   </button>
                   <button 
                     type="button"
-                    @click="openWhatsApp(s.phone, s.displayName)"
+                    @click="openWhatsApp(s.phone, s.displayName, s.classId)"
                     class="p-2 bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 rounded-lg transition"
                     title="Kirim Pesan WhatsApp"
                   >
@@ -239,7 +253,7 @@ function exportStudentsExcel() {
             <h3 class="text-base font-bold text-slate-900">
               Profil Siswa Asuh (Lampiran A)
             </h3>
-            <span class="text-xs text-slate-500">SMK Negeri 5 Telkom Banda Aceh</span>
+            <span class="text-xs text-slate-500">{{ schoolStore.profile.name }}</span>
           </div>
           <button @click="activeStudent = null" class="p-1 text-slate-400 hover:text-slate-700">
             <X class="w-5 h-5" />
@@ -252,7 +266,7 @@ function exportStudentsExcel() {
           <div>
             <h4 class="font-extrabold text-slate-900 text-base">{{ activeStudent.displayName }}</h4>
             <p class="text-xs text-slate-500">NISN: <span class="font-mono font-bold">{{ activeStudent.nisn }}</span></p>
-            <p class="text-xs text-slate-500">Kelas: <span class="font-bold text-slate-700">XII RPL 2</span></p>
+            <p class="text-xs text-slate-500">Kelas: <span class="font-bold text-slate-700">{{ schoolStore.getClassName(activeStudent.classId) }}</span></p>
           </div>
         </div>
 

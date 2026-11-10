@@ -22,8 +22,14 @@ const habitEntries = ref({})
 const photoEvidenceUrl = ref('')
 const gratitudeNote = ref('')
 const isSaved = ref(false)
+const isSaving = ref(false)
 
-onMounted(() => {
+onMounted(async () => {
+  loadJournalForDate(selectedDate.value)
+  await Promise.all([
+    habitStore.fetchHabitsDefinitionFromFirestore(),
+    habitStore.fetchJournalsFromFirestore()
+  ])
   loadJournalForDate(selectedDate.value)
 })
 
@@ -52,30 +58,37 @@ function loadJournalForDate(date) {
   }
 }
 
-function handleSave() {
+async function handleSave() {
   const studentUid = authStore.currentUser?.uid
-  if (!studentUid) return
+  if (!studentUid || isSaving.value) return
 
-  habitStore.saveJournal(studentUid, selectedDate.value, {
-    mood: currentMood.value,
-    habits: habitEntries.value,
-    photoEvidenceUrl: photoEvidenceUrl.value,
-    gratitudeNote: gratitudeNote.value,
-    status: 'submitted'
-  })
+  try {
+    isSaving.value = true
+    await habitStore.saveJournal(studentUid, selectedDate.value, {
+      mood: currentMood.value,
+      habits: habitEntries.value,
+      photoEvidenceUrl: photoEvidenceUrl.value,
+      gratitudeNote: gratitudeNote.value,
+      status: 'submitted'
+    })
 
-  // Trigger celebration confetti
-  confetti({
-    particleCount: 80,
-    spread: 70,
-    origin: { y: 0.6 }
-  })
+    // Trigger celebration confetti
+    confetti({
+      particleCount: 80,
+      spread: 70,
+      origin: { y: 0.6 }
+    })
 
-  isSaved.value = true
-  setTimeout(() => {
-    isSaved.value = false
-    router.push('/siswa/dashboard')
-  }, 1200)
+    isSaved.value = true
+    setTimeout(() => {
+      isSaved.value = false
+      router.push('/siswa/dashboard')
+    }, 1200)
+  } catch (err) {
+    alert('Gagal menyimpan jurnal ke Firestore: ' + err.message)
+  } finally {
+    isSaving.value = false
+  }
 }
 </script>
 
@@ -149,12 +162,13 @@ function handleSave() {
       <button 
         type="button"
         @click="handleSave"
-        class="w-full bg-gradient-to-r from-brand-600 to-brand-700 hover:from-brand-700 hover:to-brand-800 text-white font-extrabold py-4 px-6 rounded-2xl shadow-xl hover:shadow-2xl transition-all duration-200 flex items-center justify-center gap-2 transform active:scale-95"
+        :disabled="isSaving"
+        class="w-full bg-gradient-to-r from-brand-600 to-brand-700 hover:from-brand-700 hover:to-brand-800 text-white font-extrabold py-4 px-6 rounded-2xl shadow-xl hover:shadow-2xl transition-all duration-200 flex items-center justify-center gap-2 transform active:scale-95 disabled:opacity-60"
       >
         <CheckCircle2 v-if="isSaved" class="w-5 h-5 text-emerald-300 animate-bounce" />
         <Save v-else class="w-5 h-5" />
         <span class="text-base tracking-wide">
-          {{ isSaved ? 'Alhamdulillah, Jurnal Tersimpan! 🎉' : 'Simpan & Kirim Jurnal Hari Ini ✨' }}
+          {{ isSaving ? 'Menyimpan Jurnal...' : isSaved ? 'Alhamdulillah, Jurnal Tersimpan! 🎉' : 'Simpan & Kirim Jurnal Hari Ini ✨' }}
         </span>
       </button>
     </div>

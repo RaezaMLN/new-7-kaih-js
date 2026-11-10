@@ -3,17 +3,21 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/authStore'
 import { useHabitStore } from '../../stores/habitStore'
+import { useSchoolStore } from '../../stores/schoolStore'
 import StreakCard from '../../components/student/StreakCard.vue'
 import { BookOpenCheck, History, ArrowRight, MessageSquareQuote, CheckCircle, Clock } from 'lucide-vue-next'
 
 const router = useRouter()
 const authStore = useAuthStore()
 const habitStore = useHabitStore()
+const schoolStore = useSchoolStore()
 
 const todayStr = habitStore.getTodayString()
 const todayJournal = computed(() => habitStore.getJournal(authStore.currentUser?.uid, todayStr))
 const completionRate = computed(() => habitStore.getCompletionRate(authStore.currentUser?.uid, todayStr))
 const streak = computed(() => authStore.currentUser?.streak || 1)
+const studentClassName = computed(() => schoolStore.getClassName(authStore.currentUser?.classId))
+const assignedTeacher = computed(() => authStore.getTeacherForStudent(authStore.currentUser, schoolStore.classes))
 
 // Indonesian formatted date
 const dateDisplay = computed(() => {
@@ -34,7 +38,7 @@ const dateDisplay = computed(() => {
           Semangat Pagi, {{ authStore.currentUser?.displayName }}! 👋
         </h1>
         <p class="text-xs sm:text-sm text-slate-500 font-medium">
-          Kelas: <span class="font-bold text-slate-700">XII RPL 2</span> • SMK Negeri 5 Telkom Banda Aceh
+          Kelas: <span class="font-bold text-slate-700">{{ studentClassName }}</span> • {{ schoolStore.profile.name }}
         </p>
       </div>
 
@@ -70,7 +74,7 @@ const dateDisplay = computed(() => {
         <p class="text-sm font-medium mt-0.5 leading-snug">
           "{{ todayJournal.teacherFeedback }}"
         </p>
-        <span class="text-[10px] text-amber-600/80 mt-1 block">Wali Kelas: RAEZA MAULANA</span>
+        <span class="text-[10px] text-amber-600/80 mt-1 block">Wali Kelas: {{ assignedTeacher?.displayName || 'Guru Wali' }}</span>
       </div>
     </div>
 

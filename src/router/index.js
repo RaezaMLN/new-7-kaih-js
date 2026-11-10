@@ -60,6 +60,12 @@ const routes = [
     component: () => import('../views/teacher/TeacherReportView.vue'),
     meta: { role: 'guru_wali' }
   },
+  {
+    path: '/guru/profil',
+    name: 'teacher-profile',
+    component: () => import('../views/common/ProfileView.vue'),
+    meta: { role: 'guru_wali' }
+  },
 
   // Admin Routes (Lazy Loaded)
   {
@@ -78,6 +84,12 @@ const routes = [
     path: '/admin/settings',
     name: 'admin-settings',
     component: () => import('../views/admin/AdminSettingsView.vue'),
+    meta: { role: 'admin' }
+  },
+  {
+    path: '/admin/profil',
+    name: 'admin-profile',
+    component: () => import('../views/common/ProfileView.vue'),
     meta: { role: 'admin' }
   },
 
@@ -108,8 +120,9 @@ const router = createRouter({
 })
 
 // Navigation Guard
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
+  await authStore.initAuth()
 
   if (to.meta.public) {
     if (authStore.isAuthenticated) {

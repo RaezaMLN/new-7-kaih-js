@@ -8,10 +8,30 @@ import {
   initialAcademicYears, 
   initialClasses, 
   initialUsers, 
-  initialHabitsDefinition 
+  initialHabitsDefinition,
+  initialMeetings
 } from './src/data/initialData.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+function loadEnv(envPath) {
+  if (!fs.existsSync(envPath)) return {}
+  const env = {}
+  for (const rawLine of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith('#')) continue
+    const eqIndex = line.indexOf('=')
+    if (eqIndex === -1) continue
+    const key = line.slice(0, eqIndex).trim()
+    const val = line.slice(eqIndex + 1).trim().replace(/^["']|["']$/g, '')
+    env[key] = val
+  }
+  return env
+}
+
+const envVars = loadEnv(path.join(__dirname, '.env'))
+const envProjectId = envVars.VITE_FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID
+
 const serviceAccountPath = path.join(__dirname, 'serviceAccountKey.json')
 
 if (!fs.existsSync(serviceAccountPath)) {
@@ -21,87 +41,65 @@ if (!fs.existsSync(serviceAccountPath)) {
 
 const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'))
 
+if (envProjectId && serviceAccount.project_id && envProjectId !== serviceAccount.project_id) {
+  console.error(
+    `Mismatch project ID: .env VITE_FIREBASE_PROJECT_ID (${envProjectId}) != serviceAccountKey.json (${serviceAccount.project_id})`
+  )
+  process.exit(1)
+}
+
+const targetProjectId = serviceAccount.project_id || envProjectId || 'unknown'
+
 const app = initializeApp({
-  credential: cert(serviceAccount)
+  credential: cert(serviceAccount),
+  projectId: targetProjectId
 })
 
 const db = getFirestore(app)
 
+const forceOverwrite = process.argv.includes('--force')
+
+async function seedDocIfNeeded(collectionName, id, data) {
+  const ref = db.collection(collectionName).doc(id)
+  if (!forceOverwrite) {
+    const existing = await ref.get()
+    if (existing.exists) return false
+  }
+  await ref.set(data, { merge: true })
+  return true
+}
+
+async function seedCollection(collectionName, items, getId) {
+  let createdCount = 0
+  for (const item of items) {
+    const written = await seedDocIfNeeded(collectionName, getId(item), item)
+    if (written) createdCount++
+  }
+  return createdCount
+}
+
 async function seed() {
-  console.log('🚀 Memulai seeding data ke Cloud Firestore proyek: kaih-6ab8c ...')
+  console.log(
+    `🚀 Memulai seeding data ke Cloud Firestore proyek: ${targetProjectId} (${forceOverwrite ? 'mode --force' : 'hanya dokumen yang belum ada'})...`
+  )
 
-  // 1. School Profile
   console.log('📝 Menyimpan profil sekolah...')
-  await db.collection('schools').doc('default').set(initialSchoolProfile, { merge: true })
+  await seedDocIfNeeded('schools', 'default', initialSchoolProfile)
 
-  // 2. Academic Years
   console.log('📅 Menyimpan tahun pelajaran...')
-  for (const year of initialAcademicYears) {
-    await db.collection('academic_years').doc(year.id).set(year, { merge: true })
-  }
+  await seedCollection('academic_years', initialAcademicYears, (year) => year.id)
 
-  // 3. Classes
   console.log('🏫 Menyimpan data rombel / kelas...')
-  for (const cls of initialClasses) {
-    await db.collection('classes').doc(cls.id).set(cls, { merge: true })
-  }
+  await seedCollection('classes', initialClasses, (cls) => cls.id)
 
-  // 4. Habits Definition
   console.log('🌟 Menyimpan indikator 7 KAIH...')
-  for (const h of initialHabitsDefinition) {
-    await db.collection('habits_definition').doc(h.id).set(h, { merge: true })
-  }
+  await seedCollection('habits_definition', initialHabitsDefinition, (h) => h.id)
 
-  // 5. Users (Admin, Guru, Siswa)
   console.log('👥 Menyimpan data akun pengguna...')
-  for (const u of initialUsers) {
-    await db.collection('users').doc(u.uid).set(u, { merge: true })
-  }
+  await seedCollection('users', initialUsers, (u) => u.uid)
 
-  // 6. Meetings
   console.log('📋 Menyimpan data presensi pertemuan...')
-  const defaultMeetings = [
-    {
-      id: 'pertemuan_16',
-      number: 16,
-      date: '2026-08-01',
-      title: 'Pertemuan 16 - Pembinaan Kedisiplinan & Literasi',
-      isHoliday: false,
-      photoUrl: 'https://images.unsplash.com/photo-1524178232363-1fb2b075b655?w=600&auto=format&fit=crop&q=80',
-      records: {}
-    },
-    {
-      id: 'pertemuan_17',
-      number: 17,
-      date: '2026-08-15',
-      title: 'Pertemuan 17 - Diskusi Pembiasaan Ibadah & Gaya Hidup Sehat',
-      isHoliday: false,
-      photoUrl: 'https://images.unsplash.com/photo-1577896851231-70ef18881754?w=600&auto=format&fit=crop&q=80',
-      records: {}
-    },
-    {
-      id: 'pertemuan_18',
-      number: 18,
-      date: '2026-08-29',
-      title: 'Pertemuan 18 - Refleksi Kegiatan Sosial & Berbagi',
-      isHoliday: false,
-      photoUrl: '',
-      records: {}
-    },
-    {
-      id: 'pertemuan_19',
-      number: 19,
-      date: '2026-09-12',
-      title: 'Pertemuan 19 - Evaluasi Progres 7 KAIH Pekan Ini',
-      isHoliday: false,
-      photoUrl: '',
-      records: {}
-    }
-  ]
-
-  for (const m of defaultMeetings) {
-    await db.collection('meetings').doc(m.id).set(m, { merge: true })
-  }
+  await seedCollection('meetings', initialMeetings, (m) => m.id)
 
   console.log('✅ Seeding Firestore berhasil 100%! Seluruh koleksi siap digunakan.')
   process.exit(0)

@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { useSchoolStore } from '../../stores/schoolStore'
 import OfficialLetterhead from '../../components/report/OfficialLetterhead.vue'
 import ImageUpload from '../../components/common/ImageUpload.vue'
@@ -8,13 +8,39 @@ import { School, Save, CheckCircle2, RefreshCw } from 'lucide-vue-next'
 const schoolStore = useSchoolStore()
 const form = ref({ ...schoolStore.profile })
 const isSaved = ref(false)
+const isSaving = ref(false)
+const isLoadedFromServer = ref(false)
 
-function handleSave() {
-  schoolStore.updateProfile(form.value)
-  isSaved.value = true
-  setTimeout(() => {
-    isSaved.value = false
-  }, 2000)
+onMounted(async () => {
+  await schoolStore.fetchFromFirestore()
+  form.value = { ...schoolStore.profile }
+  isLoadedFromServer.value = true
+})
+
+watch(
+  () => schoolStore.profile,
+  (updated) => {
+    if (!isLoadedFromServer.value) {
+      form.value = { ...updated }
+    }
+  },
+  { deep: true }
+)
+
+async function handleSave() {
+  if (isSaving.value) return
+  try {
+    isSaving.value = true
+    await schoolStore.updateProfile(form.value)
+    isSaved.value = true
+    setTimeout(() => {
+      isSaved.value = false
+    }, 2000)
+  } catch (err) {
+    alert('Gagal menyimpan pengaturan ke Firestore: ' + err.message)
+  } finally {
+    isSaving.value = false
+  }
 }
 </script>
 

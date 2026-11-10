@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { uploadToCloudinary } from '../../services/cloudinary'
 import { Camera, UploadCloud, X, CheckCircle2, Loader2 } from 'lucide-vue-next'
 
@@ -29,7 +29,15 @@ const isUploading = ref(false)
 const uploadProgress = ref('')
 const previewUrl = ref(props.modelValue)
 
+watch(
+  () => props.modelValue,
+  (newValue) => {
+    previewUrl.value = newValue || ''
+  }
+)
+
 function triggerSelect() {
+  if (isUploading.value) return
   fileInput.value?.click()
 }
 
@@ -39,8 +47,8 @@ async function handleFileChange(event) {
 
   try {
     isUploading.value = true
-    uploadProgress.value = 'Mengompresi gambar...'
-    
+    uploadProgress.value = 'Mengompresi & mengunggah gambar...'
+
     const result = await uploadToCloudinary(file, props.folder)
     previewUrl.value = result.secureUrl || result.url
     emit('update:modelValue', previewUrl.value)
@@ -50,6 +58,7 @@ async function handleFileChange(event) {
     alert('Gagal mengunggah foto: ' + error.message)
   } finally {
     isUploading.value = false
+    if (fileInput.value) fileInput.value.value = ''
     setTimeout(() => {
       uploadProgress.value = ''
     }, 2000)

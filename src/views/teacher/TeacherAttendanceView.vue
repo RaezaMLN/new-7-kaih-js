@@ -1,30 +1,44 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useAuthStore } from '../../stores/authStore'
 import { useAttendanceStore } from '../../stores/attendanceStore'
+import { useSchoolStore } from '../../stores/schoolStore'
 import ImageUpload from '../../components/common/ImageUpload.vue'
 import * as XLSX from 'xlsx'
 import { 
-  ClipboardCheck, 
-  Calendar, 
   Check, 
   Save, 
-  AlertCircle, 
-  Camera, 
   CheckCircle2, 
   Ban,
-  Download
+  Download,
+  Plus,
+  X
 } from 'lucide-vue-next'
 
 const authStore = useAuthStore()
 const attendanceStore = useAttendanceStore()
+const schoolStore = useSchoolStore()
 
-// Filter students for Pak Raeza's class (XII RPL 2)
+const teacher = computed(() => authStore.currentUser)
+const teacherClasses = computed(() => authStore.getTeacherClasses(teacher.value, schoolStore.classes))
+
+// Dynamic students assigned to this Guru Wali
 const students = computed(() => {
-  return authStore.usersList.filter(u => u.role === 'siswa' && u.classId === 'xii_rpl_2')
+  return authStore.getStudentsForTeacher(teacher.value, schoolStore.classes)
 })
 
-const selectedMeetingId = ref(attendanceStore.meetings[0]?.id || '')
+const activeClassId = computed(() => {
+  return (
+    teacher.value?.assignedClassId ||
+    teacherClasses.value[0]?.id ||
+    students.value[0]?.classId ||
+    'xii_rpl_2'
+  )
+})
+const activeClassName = computed(() => schoolStore.getClassName(activeClassId.value))
+const classMeetings = computed(() => attendanceStore.getMeetingsForClass(activeClassId.value))
+
+const selectedMeetingId = ref('')
 const selectedMeeting = computed(() => attendanceStore.getMeeting(selectedMeetingId.value))
 
 // Attendance form records: { studentUid: 'H' | 'S' | 'I' | 'A' }
@@ -32,10 +46,61 @@ const records = ref({})
 const photoUrl = ref('')
 const isHoliday = ref(false)
 const isSaved = ref(false)
+const isSaving = ref(false)
 
-onMounted(() => {
-  loadMeetingData()
+// New Meeting Modal
+const isNewMeetingModalOpen = ref(false)
+const isCreatingMeeting = ref(false)
+const newMeetingForm = ref({
+  title: '',
+  date: new Date().toISOString().split('T')[0]
 })
+
+function syncSelectedMeeting() {
+  if (!classMeetings.value.some(m => m.id === selectedMeetingId.value)) {
+    selectedMeetingId.value = classMeetings.value[0]?.id || ''
+  }
+  loadMeetingData()
+}
+
+onMounted(async () => {
+  syncSelectedMeeting()
+  await Promise.all([
+    authStore.fetchUsersFromFirestore(),
+    attendanceStore.fetchMeetingsFromFirestore()
+  ])
+  syncSelectedMeeting()
+})
+
+watch([students, classMeetings], () => {
+  syncSelectedMeeting()
+})
+
+async function handleCreateMeeting() {
+  if (!newMeetingForm.value.title.trim()) {
+    alert('Judul / topik pertemuan wajib diisi.')
+    return
+  }
+  try {
+    isCreatingMeeting.value = true
+    const created = await attendanceStore.addMeeting({
+      classId: activeClassId.value,
+      title: newMeetingForm.value.title.trim(),
+      date: newMeetingForm.value.date
+    })
+    selectedMeetingId.value = created.id
+    loadMeetingData()
+    isNewMeetingModalOpen.value = false
+    newMeetingForm.value = {
+      title: '',
+      date: new Date().toISOString().split('T')[0]
+    }
+  } catch (err) {
+    alert('Gagal membuat pertemuan baru di Firestore: ' + err.message)
+  } finally {
+    isCreatingMeeting.value = false
+  }
+}
 
 function loadMeetingData() {
   const m = selectedMeeting.value
@@ -67,31 +132,39 @@ function toggleHoliday() {
   isHoliday.value = !isHoliday.value
 }
 
-function handleSave() {
-  attendanceStore.saveMeetingAttendance(selectedMeetingId.value, {
-    records: records.value,
-    photoUrl: photoUrl.value,
-    isHoliday: isHoliday.value
-  })
+async function handleSave() {
+  if (isSaving.value) return
+  try {
+    isSaving.value = true
+    await attendanceStore.saveMeetingAttendance(selectedMeetingId.value, {
+      records: records.value,
+      photoUrl: photoUrl.value,
+      isHoliday: isHoliday.value
+    })
 
-  isSaved.value = true
-  setTimeout(() => {
-    isSaved.value = false
-  }, 2000)
+    isSaved.value = true
+    setTimeout(() => {
+      isSaved.value = false
+    }, 2000)
+  } catch (err) {
+    alert('Gagal menyimpan absensi ke Firestore: ' + err.message)
+  } finally {
+    isSaving.value = false
+  }
 }
 
 function exportAttendanceExcel() {
   const exportData = students.value.map((s, idx) => {
-    const summary = attendanceStore.getStudentAttendanceSummary(s.uid)
+    const summary = attendanceStore.getStudentAttendanceSummary(s.uid, activeClassId.value)
     const row = {
       'No': idx + 1,
       'Nama Peserta Didik': s.displayName,
       'NISN': s.nisn,
-      'Kelas': 'XII RPL 2'
+      'Kelas': schoolStore.getClassName(s.classId)
     }
 
     // Add each meeting status
-    attendanceStore.meetings.forEach(m => {
+    classMeetings.value.forEach(m => {
       const status = m.isHoliday ? 'Libur' : (m.records?.[s.uid] || 'H')
       row[`Pertemuan ${m.number} (${m.date})`] = status
     })
@@ -107,8 +180,9 @@ function exportAttendanceExcel() {
 
   const worksheet = XLSX.utils.json_to_sheet(exportData)
   const workbook = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'Rekap_Presensi_XII_RPL_2')
-  XLSX.writeFile(workbook, `Rekap_Presensi_XII_RPL_2_2025_2026.xlsx`)
+  const safeClass = activeClassName.value.replace(/[^a-zA-Z0-9]+/g, '_')
+  XLSX.utils.book_append_sheet(workbook, worksheet, `Rekap_Presensi_${safeClass}`.slice(0, 31))
+  XLSX.writeFile(workbook, `Rekap_Presensi_${safeClass}.xlsx`)
 }
 </script>
 
@@ -143,10 +217,21 @@ function exportAttendanceExcel() {
             @change="handleMeetingChange"
             class="px-3.5 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 shadow-sm focus:ring-2 focus:ring-brand-500"
           >
-            <option v-for="m in attendanceStore.meetings" :key="m.id" :value="m.id">
+            <option v-if="classMeetings.length === 0" value="">Belum ada pertemuan ({{ activeClassName }})</option>
+            <option v-for="m in classMeetings" :key="m.id" :value="m.id">
               Pertemuan {{ m.number }} ({{ m.date }})
             </option>
           </select>
+
+          <button
+            type="button"
+            @click="isNewMeetingModalOpen = true"
+            class="px-3 py-2 bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-200 rounded-xl text-xs font-bold transition flex items-center gap-1"
+            title="Buat pertemuan baru untuk kelas ini"
+          >
+            <Plus class="w-4 h-4" />
+            <span>Pertemuan</span>
+          </button>
         </div>
       </div>
     </div>
@@ -228,7 +313,7 @@ function exportAttendanceExcel() {
                 <span class="font-bold text-slate-900 block">{{ s.displayName }}</span>
               </td>
               <td class="py-3.5 px-4 font-mono text-slate-500">{{ s.nisn }}</td>
-              <td class="py-3.5 px-4 font-semibold text-slate-600">XII RPL 2</td>
+              <td class="py-3.5 px-4 font-semibold text-slate-600">{{ schoolStore.getClassName(s.classId) }}</td>
               <td class="py-3.5 px-4">
                 <div class="flex items-center justify-center gap-1.5 select-none">
                   <!-- H = Hadir -->
@@ -291,13 +376,70 @@ function exportAttendanceExcel() {
     </div>
 
     <!-- Documentation Upload (Lampiran E) -->
-    <div class="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200 shadow-sm">
+    <div v-if="selectedMeeting" class="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200 shadow-sm">
       <ImageUpload 
         v-model="photoUrl"
         folder="7kaih/attendance"
         label="Dokumentasi Foto Pertemuan (Lampiran E)"
         hint="Unggah foto kegiatan pembinaan karakter untuk arsip laporan dinas"
       />
+    </div>
+
+    <!-- Modal Tambah Pertemuan Baru -->
+    <div
+      v-if="isNewMeetingModalOpen"
+      class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      @click.self="isNewMeetingModalOpen = false"
+    >
+      <div class="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-200 space-y-4">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+          <h3 class="text-base font-bold text-slate-900">
+            Tambah Pertemuan ({{ activeClassName }})
+          </h3>
+          <button type="button" @click="isNewMeetingModalOpen = false" class="text-slate-400 hover:text-slate-700">
+            <X class="w-5 h-5" />
+          </button>
+        </div>
+
+        <div class="space-y-3 text-xs">
+          <div>
+            <label class="font-bold text-slate-700 block mb-1">Judul / Topik Pertemuan:</label>
+            <input
+              v-model="newMeetingForm.title"
+              type="text"
+              placeholder="Contoh: Pertemuan 1 - Evaluasi Kedisiplinan"
+              class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
+            />
+          </div>
+
+          <div>
+            <label class="font-bold text-slate-700 block mb-1">Tanggal Pertemuan:</label>
+            <input
+              v-model="newMeetingForm.date"
+              type="date"
+              class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl"
+            />
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <button
+            type="button"
+            @click="isNewMeetingModalOpen = false"
+            class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            @click="handleCreateMeeting"
+            :disabled="isCreatingMeeting"
+            class="px-4 py-2 rounded-xl text-xs font-bold bg-brand-600 hover:bg-brand-700 text-white shadow disabled:opacity-50"
+          >
+            {{ isCreatingMeeting ? 'Menyimpan...' : 'Buat Pertemuan' }}
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>

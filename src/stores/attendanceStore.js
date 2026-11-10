@@ -1,55 +1,15 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { initialMeetings } from '../data/initialData'
 import { db } from '../services/firebase'
-import { doc, getDocs, setDoc, collection } from 'firebase/firestore'
+import { ensureFirestoreReady } from '../services/firestoreBootstrap'
+import { doc, getDocs, setDoc, collection, onSnapshot } from 'firebase/firestore'
 
 export const useAttendanceStore = defineStore('attendance', () => {
-  const defaultMeetings = [
-    {
-      id: 'pertemuan_16',
-      number: 16,
-      date: '2026-08-01',
-      title: 'Pertemuan 16 - Pembinaan Kedisiplinan & Literasi',
-      isHoliday: false,
-      photoUrl: 'https://images.unsplash.com/photo-1524178232363-1fb2b075b655?w=600&auto=format&fit=crop&q=80',
-      records: {}
-    },
-    {
-      id: 'pertemuan_17',
-      number: 17,
-      date: '2026-08-15',
-      title: 'Pertemuan 17 - Diskusi Pembiasaan Ibadah & Gaya Hidup Sehat',
-      isHoliday: false,
-      photoUrl: 'https://images.unsplash.com/photo-1577896851231-70ef18881754?w=600&auto=format&fit=crop&q=80',
-      records: {}
-    },
-    {
-      id: 'pertemuan_18',
-      number: 18,
-      date: '2026-08-29',
-      title: 'Pertemuan 18 - Refleksi Kegiatan Sosial & Berbagi',
-      isHoliday: false,
-      photoUrl: '',
-      records: {}
-    },
-    {
-      id: 'pertemuan_19',
-      number: 19,
-      date: '2026-09-12',
-      title: 'Pertemuan 19 - Evaluasi Progres 7 KAIH Pekan Ini',
-      isHoliday: false,
-      photoUrl: '',
-      records: {}
-    }
-  ]
+  const meetings = ref(db ? [] : [...initialMeetings])
 
-  const meetings = ref(
-    JSON.parse(localStorage.getItem('7kaih_meetings_db') || 'null') || defaultMeetings
-  )
-
-  function saveMeetings() {
-    localStorage.setItem('7kaih_meetings_db', JSON.stringify(meetings.value))
-  }
+  let fetchMeetingsPromise = null
+  let unsubscribeMeetings = null
 
   function getMeeting(meetingId) {
     return meetings.value.find(m => m.id === meetingId) || null
@@ -67,52 +27,50 @@ export const useAttendanceStore = defineStore('attendance', () => {
         updatedAt: new Date().toISOString()
       }
       meetings.value[idx] = updated
-      saveMeetings()
 
-      // Sync to Firestore
       if (db) {
-        try {
-          await setDoc(doc(db, 'meetings', meetingId), updated, { merge: true })
-        } catch (e) {
-          console.warn('Firestore save meeting error:', e)
-        }
+        await setDoc(doc(db, 'meetings', meetingId), updated, { merge: true })
       }
 
       return meetings.value[idx]
     }
   }
 
+  function getMeetingsForClass(classId) {
+    if (!classId) return meetings.value
+    return meetings.value.filter(m => m.classId === classId || (!m.classId && classId === 'xii_rpl_2'))
+  }
+
   async function addMeeting(meetingData) {
+    const classMeetings = meetingData.classId ? getMeetingsForClass(meetingData.classId) : meetings.value
+    const nextNumber = meetingData.number || classMeetings.length + 1
     const newMeeting = {
       id: 'pertemuan_' + Date.now(),
-      number: meetings.value.length + 1,
+      classId: meetingData.classId || '',
+      number: nextNumber,
       date: meetingData.date || new Date().toISOString().split('T')[0],
-      title: meetingData.title || `Pertemuan ${meetings.value.length + 1}`,
+      title: meetingData.title || `Pertemuan ${nextNumber}`,
       isHoliday: Boolean(meetingData.isHoliday),
       photoUrl: meetingData.photoUrl || '',
       records: meetingData.records || {}
     }
     meetings.value.push(newMeeting)
-    saveMeetings()
 
     if (db) {
-      try {
-        await setDoc(doc(db, 'meetings', newMeeting.id), newMeeting, { merge: true })
-      } catch (e) {
-        console.warn('Firestore add meeting error:', e)
-      }
+      await setDoc(doc(db, 'meetings', newMeeting.id), newMeeting, { merge: true })
     }
 
     return newMeeting
   }
 
-  function getStudentAttendanceSummary(studentUid) {
+  function getStudentAttendanceSummary(studentUid, classId = '') {
     let hadir = 0
     let sakit = 0
     let izin = 0
     let alpa = 0
 
-    meetings.value.forEach(m => {
+    const targetMeetings = classId ? getMeetingsForClass(classId) : meetings.value
+    targetMeetings.forEach(m => {
       if (m.isHoliday) return
       const status = m.records?.[studentUid] || 'H'
       if (status === 'H') hadir++
@@ -134,20 +92,46 @@ export const useAttendanceStore = defineStore('attendance', () => {
     }
   }
 
-  async function fetchMeetingsFromFirestore() {
-    if (!db) return
-    try {
-      const snap = await getDocs(collection(db, 'meetings'))
-      if (!snap.empty) {
+  function startMeetingsListener() {
+    if (!db || unsubscribeMeetings) return
+    unsubscribeMeetings = onSnapshot(
+      collection(db, 'meetings'),
+      (snap) => {
         const remote = []
         snap.forEach(d => remote.push({ id: d.id, ...d.data() }))
         remote.sort((a, b) => (a.number || 0) - (b.number || 0))
         meetings.value = remote
-        saveMeetings()
+      },
+      (error) => console.warn('Firestore meetings listener error:', error)
+    )
+  }
+
+  async function fetchMeetingsFromFirestore(force = false) {
+    if (!db) return
+    if (fetchMeetingsPromise && !force) return fetchMeetingsPromise
+
+    fetchMeetingsPromise = (async () => {
+      try {
+        await ensureFirestoreReady()
+        const snap = await getDocs(collection(db, 'meetings'))
+        const remote = []
+        snap.forEach(d => remote.push({ id: d.id, ...d.data() }))
+        remote.sort((a, b) => (a.number || 0) - (b.number || 0))
+        if (remote.length > 0) {
+          meetings.value = remote
+        }
+        startMeetingsListener()
+      } catch (e) {
+        console.warn('Firestore meetings fetch error:', e)
+        if (meetings.value.length === 0) {
+          meetings.value = [...initialMeetings]
+        }
+      } finally {
+        fetchMeetingsPromise = null
       }
-    } catch (e) {
-      console.warn('Firestore meetings fetch fallback to local:', e)
-    }
+    })()
+
+    return fetchMeetingsPromise
   }
 
   fetchMeetingsFromFirestore()
@@ -155,10 +139,10 @@ export const useAttendanceStore = defineStore('attendance', () => {
   return {
     meetings,
     getMeeting,
+    getMeetingsForClass,
     saveMeetingAttendance,
     addMeeting,
     getStudentAttendanceSummary,
-    saveMeetings,
     fetchMeetingsFromFirestore
   }
 })

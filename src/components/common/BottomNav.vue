@@ -33,7 +33,8 @@ const navItems = computed(() => {
       { name: 'Dashboard', path: '/guru/dashboard', icon: LayoutDashboard },
       { name: 'Siswa Asuh', path: '/guru/list-murid', icon: Users },
       { name: 'Presensi', path: '/guru/absensi-murid', icon: ClipboardCheck },
-      { name: 'Pelaporan', path: '/guru/pelaporan', icon: FileSpreadsheet }
+      { name: 'Pelaporan', path: '/guru/pelaporan', icon: FileSpreadsheet },
+      { name: 'Profil', path: '/guru/profil', icon: User }
     ]
   }
 
@@ -41,7 +42,8 @@ const navItems = computed(() => {
     return [
       { name: 'Sekolah', path: '/admin/dashboard', icon: LayoutDashboard },
       { name: 'Pengguna', path: '/admin/users', icon: Users },
-      { name: 'KOP & Profil', path: '/admin/settings', icon: Settings }
+      { name: 'KOP Sekolah', path: '/admin/settings', icon: Settings },
+      { name: 'Profil', path: '/admin/profil', icon: User }
     ]
   }
 
@@ -56,7 +58,7 @@ const navItems = computed(() => {
         v-for="item in navItems"
         :key="item.path"
         :to="item.path"
-        class="flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all"
+        class="flex flex-col items-center justify-center py-1 px-2 sm:px-3 rounded-xl transition-all"
         :class="route.path === item.path ? 'text-brand-600 font-semibold scale-105' : 'text-slate-500 hover:text-slate-800'"
       >
         <component :is="item.icon" class="w-5 h-5 mb-0.5" :stroke-width="route.path === item.path ? 2.4 : 1.8" />

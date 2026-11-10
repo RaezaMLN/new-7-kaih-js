@@ -385,3 +385,42 @@ export const initialHabitsDefinition = [
     color: 'rose'
   }
 ]
+
+export const initialMeetings = [
+  {
+    id: 'pertemuan_16',
+    number: 16,
+    date: '2026-08-01',
+    title: 'Pertemuan 16 - Pembinaan Kedisiplinan & Literasi',
+    isHoliday: false,
+    photoUrl: 'https://images.unsplash.com/photo-1524178232363-1fb2b075b655?w=600&auto=format&fit=crop&q=80',
+    records: {}
+  },
+  {
+    id: 'pertemuan_17',
+    number: 17,
+    date: '2026-08-15',
+    title: 'Pertemuan 17 - Diskusi Pembiasaan Ibadah & Gaya Hidup Sehat',
+    isHoliday: false,
+    photoUrl: 'https://images.unsplash.com/photo-1577896851231-70ef18881754?w=600&auto=format&fit=crop&q=80',
+    records: {}
+  },
+  {
+    id: 'pertemuan_18',
+    number: 18,
+    date: '2026-08-29',
+    title: 'Pertemuan 18 - Refleksi Kegiatan Sosial & Berbagi',
+    isHoliday: false,
+    photoUrl: '',
+    records: {}
+  },
+  {
+    id: 'pertemuan_19',
+    number: 19,
+    date: '2026-09-12',
+    title: 'Pertemuan 19 - Evaluasi Progres 7 KAIH Pekan Ini',
+    isHoliday: false,
+    photoUrl: '',
+    records: {}
+  }
+]

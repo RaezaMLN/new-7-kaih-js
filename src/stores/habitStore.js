@@ -2,15 +2,17 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { initialHabitsDefinition } from '../data/initialData'
 import { db } from '../services/firebase'
-import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore'
+import { ensureFirestoreReady } from '../services/firestoreBootstrap'
+import { doc, setDoc, collection, getDocs, onSnapshot } from 'firebase/firestore'
 
 export const useHabitStore = defineStore('habit', () => {
-  const habitsDefinition = ref(initialHabitsDefinition)
+  const habitsDefinition = ref([...initialHabitsDefinition])
+  const journals = ref({})
 
-  // Map of daily journal records keyed by: `${studentUid}_${dateStr}`
-  const journals = ref(
-    JSON.parse(localStorage.getItem('7kaih_journals_db') || '{}')
-  )
+  let fetchJournalsPromise = null
+  let fetchHabitsPromise = null
+  let unsubscribeHabits = null
+  let unsubscribeJournals = null
 
   function getTodayString() {
     const d = new Date()
@@ -38,15 +40,9 @@ export const useHabitStore = defineStore('habit', () => {
     }
 
     journals.value[key] = payload
-    localStorage.setItem('7kaih_journals_db', JSON.stringify(journals.value))
 
-    // Sync to Firestore collection 'daily_journals'
     if (db) {
-      try {
-        await setDoc(doc(db, 'daily_journals', key), payload, { merge: true })
-      } catch (e) {
-        console.warn('Firestore save journal error:', e)
-      }
+      await setDoc(doc(db, 'daily_journals', key), payload, { merge: true })
     }
 
     return journals.value[key]
@@ -65,14 +61,10 @@ export const useHabitStore = defineStore('habit', () => {
     journals.value[key].teacherFeedback = feedbackText
     journals.value[key].teacherSticker = sticker
     journals.value[key].feedbackTime = new Date().toISOString()
-    localStorage.setItem('7kaih_journals_db', JSON.stringify(journals.value))
+    journals.value[key].updatedAt = new Date().toISOString()
 
     if (db) {
-      try {
-        await setDoc(doc(db, 'daily_journals', key), journals.value[key], { merge: true })
-      } catch (e) {
-        console.warn('Firestore save feedback error:', e)
-      }
+      await setDoc(doc(db, 'daily_journals', key), journals.value[key], { merge: true })
     }
   }
 
@@ -132,24 +124,86 @@ export const useHabitStore = defineStore('habit', () => {
     return habitStats
   }
 
-  // Fetch journals from Firestore
-  async function fetchJournalsFromFirestore() {
-    if (!db) return
-    try {
-      const snap = await getDocs(collection(db, 'daily_journals'))
-      if (!snap.empty) {
-        const map = { ...journals.value }
+  function startHabitsListener() {
+    if (!db || unsubscribeHabits) return
+    unsubscribeHabits = onSnapshot(
+      collection(db, 'habits_definition'),
+      (snap) => {
+        if (snap.empty) return
+        const remote = []
+        snap.forEach(d => remote.push({ id: d.id, ...d.data() }))
+        remote.sort((a, b) => (a.number || 0) - (b.number || 0))
+        habitsDefinition.value = remote
+      },
+      (error) => console.warn('Firestore habits_definition listener error:', error)
+    )
+  }
+
+  function startJournalsListener() {
+    if (!db || unsubscribeJournals) return
+    unsubscribeJournals = onSnapshot(
+      collection(db, 'daily_journals'),
+      (snap) => {
+        const map = {}
         snap.forEach(d => {
           map[d.id] = d.data()
         })
         journals.value = map
-        localStorage.setItem('7kaih_journals_db', JSON.stringify(journals.value))
-      }
-    } catch (e) {
-      console.warn('Firestore journals fetch fallback to local:', e)
-    }
+      },
+      (error) => console.warn('Firestore daily_journals listener error:', error)
+    )
   }
 
+  async function fetchHabitsDefinitionFromFirestore(force = false) {
+    if (!db) return
+    if (fetchHabitsPromise && !force) return fetchHabitsPromise
+
+    fetchHabitsPromise = (async () => {
+      try {
+        await ensureFirestoreReady()
+        const snap = await getDocs(collection(db, 'habits_definition'))
+        if (!snap.empty) {
+          const remote = []
+          snap.forEach(d => remote.push({ id: d.id, ...d.data() }))
+          remote.sort((a, b) => (a.number || 0) - (b.number || 0))
+          habitsDefinition.value = remote
+        }
+        startHabitsListener()
+      } catch (e) {
+        console.warn('Firestore habits definition fetch error:', e)
+      } finally {
+        fetchHabitsPromise = null
+      }
+    })()
+
+    return fetchHabitsPromise
+  }
+
+  async function fetchJournalsFromFirestore(force = false) {
+    if (!db) return
+    if (fetchJournalsPromise && !force) return fetchJournalsPromise
+
+    fetchJournalsPromise = (async () => {
+      try {
+        await ensureFirestoreReady()
+        const snap = await getDocs(collection(db, 'daily_journals'))
+        const map = {}
+        snap.forEach(d => {
+          map[d.id] = d.data()
+        })
+        journals.value = map
+        startJournalsListener()
+      } catch (e) {
+        console.warn('Firestore journals fetch error:', e)
+      } finally {
+        fetchJournalsPromise = null
+      }
+    })()
+
+    return fetchJournalsPromise
+  }
+
+  fetchHabitsDefinitionFromFirestore()
   fetchJournalsFromFirestore()
 
   return {
@@ -161,6 +215,7 @@ export const useHabitStore = defineStore('habit', () => {
     addTeacherFeedback,
     getCompletionRate,
     getStudentMonthlyStats,
+    fetchHabitsDefinitionFromFirestore,
     fetchJournalsFromFirestore
   }
 })

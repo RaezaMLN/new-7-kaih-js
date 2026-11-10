@@ -28,6 +28,21 @@ export async function compressImage(file, maxSizeMB = 0.25, maxWidthOrHeight = 1
   }
 }
 
+const cloudName = (import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || '').trim()
+const uploadPreset = (import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || '').trim()
+
+const CLOUDINARY_PLACEHOLDERS = new Set([
+  'your_cloudinary_cloud_name',
+  'your_unsigned_preset'
+])
+
+export const isCloudinaryConfigured = Boolean(
+  cloudName &&
+  !CLOUDINARY_PLACEHOLDERS.has(cloudName) &&
+  uploadPreset &&
+  !CLOUDINARY_PLACEHOLDERS.has(uploadPreset)
+)
+
 /**
  * Upload an image directly to Cloudinary using Unsigned Preset
  * @param {File} file - The file to upload
@@ -35,15 +50,12 @@ export async function compressImage(file, maxSizeMB = 0.25, maxWidthOrHeight = 1
  * @returns {Promise<{ url: string, publicId: string, secureUrl: string }>}
  */
 export async function uploadToCloudinary(file, folder = '7kaih/general') {
-  const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
-  const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
-
   // 1. Compress image first in browser
   const compressed = await compressImage(file)
 
   // 2. If Cloudinary credentials are not configured yet, fallback to local Data URL
   // so the user can test all features seamlessly without error!
-  if (!cloudName || !uploadPreset || cloudName === 'your_cloudinary_cloud_name') {
+  if (!isCloudinaryConfigured) {
     console.info('Cloudinary credentials not set in .env. Using local DataURL preview mode.')
     return new Promise((resolve) => {
       const reader = new FileReader()
@@ -62,7 +74,9 @@ export async function uploadToCloudinary(file, folder = '7kaih/general') {
   const formData = new FormData()
   formData.append('file', compressed)
   formData.append('upload_preset', uploadPreset)
-  formData.append('folder', folder)
+  if (folder) {
+    formData.append('folder', folder)
+  }
 
   const uploadUrl = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`
 

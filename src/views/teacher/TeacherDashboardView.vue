@@ -24,9 +24,23 @@ const schoolStore = useSchoolStore()
 const teacher = computed(() => authStore.currentUser)
 const todayStr = habitStore.getTodayString()
 
-// Filter students for Pak Raeza's class (XII RPL 2)
+const teacherClasses = computed(() => authStore.getTeacherClasses(teacher.value, schoolStore.classes))
+const teacherClassLabel = computed(() => {
+  if (teacherClasses.value.length > 0) {
+    return teacherClasses.value.map(c => c.name).join(', ')
+  }
+  return teacher.value?.assignedClassId
+    ? schoolStore.getClassName(teacher.value.assignedClassId)
+    : 'Siswa Binaan'
+})
+const activeSemesterLabel = computed(() => {
+  const active = schoolStore.academicYears.find(y => y.isActive) || schoolStore.academicYears[0]
+  return active ? `Semester ${active.semester} ${active.name}` : 'Semester Aktif'
+})
+
+// Dynamic students assigned to this Guru Wali (via class or direct mentorship)
 const students = computed(() => {
-  return authStore.usersList.filter(u => u.role === 'siswa' && u.classId === 'xii_rpl_2')
+  return authStore.getStudentsForTeacher(teacher.value, schoolStore.classes)
 })
 
 // Submission calculations
@@ -59,7 +73,7 @@ function sendWhatsAppReminder() {
   }
 
   const namesList = pendingStudents.map((s, idx) => `${idx + 1}. ${s.displayName}`).join('%0A')
-  const message = `Assalamu'alaikum wr. wb.%0APengingat untuk ananda siswa asuh XII RPL 2 yang belum melengkapi Jurnal 7 KAIH hari ini (${todayStr}):%0A%0A${namesList}%0A%0AMohon segera melengkapi di link: https://${schoolStore.profile.website || '7kaih.smkn5telkom.sch.id'}%0ATerima kasih.%0A- Guru Wali: ${teacher.value?.displayName}`
+  const message = `Assalamu'alaikum wr. wb.%0APengingat untuk ananda siswa asuh ${teacherClassLabel.value} yang belum melengkapi Jurnal 7 KAIH hari ini (${todayStr}):%0A%0A${namesList}%0A%0AMohon segera melengkapi di link: https://${schoolStore.profile.website || '7kaih.smkn5telkom.sch.id'}%0ATerima kasih.%0A- Guru Wali: ${teacher.value?.displayName}`
   
   const waUrl = `https://wa.me/?text=${message}`
   window.open(waUrl, '_blank')
@@ -76,16 +90,20 @@ function openFeedbackModal(student) {
   selectedSticker.value = student.journal?.teacherSticker || '⭐'
 }
 
-function saveFeedback() {
+async function saveFeedback() {
   if (!selectedStudent.value) return
-  habitStore.addTeacherFeedback(
-    selectedStudent.value.uid, 
-    todayStr, 
-    feedbackText.value || 'Tetap semangat dan istiqamah dalam kebaikan!', 
-    selectedSticker.value
-  )
-  selectedStudent.value = null
-  alert('Apresiasi / Catatan Guru berhasil dikirim!')
+  try {
+    await habitStore.addTeacherFeedback(
+      selectedStudent.value.uid, 
+      todayStr, 
+      feedbackText.value || 'Tetap semangat dan istiqamah dalam kebaikan!', 
+      selectedSticker.value
+    )
+    selectedStudent.value = null
+    alert('Apresiasi / Catatan Guru berhasil dikirim!')
+  } catch (err) {
+    alert('Gagal mengirim catatan ke Firestore: ' + err.message)
+  }
 }
 </script>
 
@@ -94,11 +112,13 @@ function saveFeedback() {
     <!-- Teacher Header Profile -->
     <div class="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
       <div class="flex items-center gap-4">
-        <img 
-          :src="teacher?.photoURL" 
-          alt="Guru" 
-          class="w-16 h-16 rounded-2xl object-cover ring-2 ring-brand-500 shadow-sm flex-shrink-0"
-        />
+        <router-link to="/guru/profil" class="flex-shrink-0" title="Edit Profil Saya">
+          <img 
+            :src="teacher?.photoURL" 
+            alt="Guru" 
+            class="w-16 h-16 rounded-2xl object-cover ring-2 ring-brand-500 shadow-sm hover:opacity-90 transition"
+          />
+        </router-link>
         <div>
           <div class="flex items-center gap-2">
             <span class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
@@ -110,8 +130,8 @@ function saveFeedback() {
             Selamat Datang, {{ teacher?.displayName }} 👋
           </h1>
           <p class="text-xs text-slate-500 font-medium mt-0.5">
-            Unit Kerja: <span class="font-bold text-slate-700">REKAYASA PERANGKAT LUNAK</span> • 
-            Kelas Dampingan: <span class="font-bold text-brand-700">XII RPL 2</span> (14 Siswa Asuh)
+            Unit Kerja: <span class="font-bold text-slate-700">{{ teacher?.unitKerja || teacherClasses[0]?.major || schoolStore.profile.name }}</span> • 
+            Kelas Dampingan: <span class="font-bold text-brand-700">{{ teacherClassLabel }}</span> ({{ students.length }} Siswa Asuh)
           </p>
         </div>
       </div>
@@ -151,7 +171,7 @@ function saveFeedback() {
           <span class="text-3xl font-black text-slate-900">{{ students.length }}</span>
           <span class="text-xs font-semibold text-slate-500">Siswa Asuh</span>
         </div>
-        <span class="text-[11px] text-slate-400 mt-1 block">Kelas XII RPL 2 • Semester Ganjil</span>
+        <span class="text-[11px] text-slate-400 mt-1 block">{{ teacherClassLabel }} • {{ activeSemesterLabel }}</span>
       </div>
 
       <!-- Card 2: Pengisian Hari Ini -->
